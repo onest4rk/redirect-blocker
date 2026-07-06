@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Redirect Blocker</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 320px;
+      min-height: 200px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-size: 14px;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #16213e 0%, #0f3460 100%);
+      padding: 16px;
+      border-bottom: 1px solid #333;
+    }
+
+    .header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .toggle-label {
+      font-size: 13px;
+      color: #a0a0a0;
+    }
+
+    .toggle-switch {
+      position: relative;
+      width: 48px;
+      height: 26px;
+    }
+
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #555;
+      transition: 0.3s;
+      border-radius: 26px;
+    }
+
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 20px;
+      width: 20px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: 0.3s;
+      border-radius: 50%;
+    }
+
+    input:checked + .toggle-slider {
+      background-color: #4caf50;
+    }
+
+    input:checked + .toggle-slider:before {
+      transform: translateX(22px);
+    }
+
+    .stats {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      padding: 10px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+    }
+
+    .stat-icon {
+      width: 32px;
+      height: 32px;
+      background: #e53935;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 14px;
+      color: white;
+    }
+
+    .stat-text {
+      font-size: 13px;
+    }
+
+    .stat-text .count {
+      font-size: 18px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .log-toggle {
+      width: 100%;
+      padding: 10px 16px;
+      background: transparent;
+      border: none;
+      border-top: 1px solid #333;
+      color: #8ab4f8;
+      font-size: 13px;
+      cursor: pointer;
+      text-align: left;
+      transition: background 0.2s;
+    }
+
+    .log-toggle:hover {
+      background: rgba(255,255,255,0.05);
+    }
+
+    .log-toggle::after {
+      content: ' ▼';
+      font-size: 10px;
+    }
+
+    .log-toggle.expanded::after {
+      content: ' ▲';
+    }
+
+    .log-container {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+      border-top: 1px solid #333;
+    }
+
+    .log-container.expanded {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .log-list {
+      padding: 8px;
+    }
+
+    .log-item {
+      padding: 8px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 4px;
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+
+    .log-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .log-item .type {
+      color: #e53935;
+      font-weight: 500;
+    }
+
+    .log-item .domain {
+      color: #8ab4f8;
+      word-break: break-all;
+    }
+
+    .log-item .time {
+      color: #666;
+      font-size: 11px;
+    }
+
+    .log-empty {
+      padding: 16px;
+      text-align: center;
+      color: #666;
+      font-size: 13px;
+    }
+
+    .footer {
+      padding: 12px 16px;
+      border-top: 1px solid #333;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .footer a {
+      color: #8ab4f8;
+      text-decoration: none;
+      font-size: 12px;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+
+    .clear-btn {
+      padding: 6px 12px;
+      background: #e53935;
+      border: none;
+      border-radius: 4px;
+      color: white;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .clear-btn:hover {
+      background: #c62828;
+    }
+
+    /* Scrollbar styling */
+    .log-container::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .log-container::-webkit-scrollbar-track {
+      background: #1a1a2e;
+    }
+
+    .log-container::-webkit-scrollbar-thumb {
+      background: #555;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Redirect Blocker</h1>
+    <div class="toggle-row">
+      <span class="toggle-label">Enabled on this site</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="siteToggle" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="stats">
+      <div class="stat-icon" id="blockedCountIcon">0</div>
+      <div class="stat-text">
+        <span class="count" id="blockedCount">0</span> blocked on this page
+      </div>
+    </div>
+  </div>
+
+  <button class="log-toggle" id="logToggle">View blocked log</button>
+
+  <div class="log-container" id="logContainer">
+    <div class="log-list" id="logList">
+      <div class="log-empty">No blocked events yet</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <a href="#" id="optionsLink">Manage blocked domains</a>
+    <button class="clear-btn" id="clearLog">Clear log</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

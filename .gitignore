@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+
+# Build output
+dist/
+build/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Chrome extension specific
+*.crx
+*.pem
+update_url.xml
+
+# Temporary files
+*.tmp
+*.temp
+
+# Generated icons (use proper icon files)
+generate-icons.html
+create-icons.ps1
+
+# Logs
+*.log
