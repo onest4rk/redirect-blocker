@@ -254,12 +254,13 @@ async function removeFromAllowlist(hostname) {
 // ============================================================================
 const tabLastUrl = {};
 
-chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
-  if (details.frameId !== 0) return;
+if (chrome.webNavigation && chrome.webNavigation.onBeforeNavigate) {
+  chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
+    if (details.frameId !== 0) return;
 
-  if (!tabLastUrl[details.tabId]) {
-    tabLastUrl[details.tabId] = details.url;
-    return;
+    if (!tabLastUrl[details.tabId]) {
+      tabLastUrl[details.tabId] = details.url;
+      return;
   }
 
   const result = await chrome.storage.local.get(['siteAllowlist', 'globalDisabled']);
@@ -296,10 +297,11 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
   }
 });
 
-chrome.webNavigation.onCompleted.addListener((details) => {
-  if (details.frameId !== 0) return;
-  if (details.tabId) tabLastUrl[details.tabId] = details.url;
-});
+  chrome.webNavigation.onCompleted.addListener((details) => {
+    if (details.frameId !== 0) return;
+    if (details.tabId) tabLastUrl[details.tabId] = details.url;
+  });
+}
 
 // Clean up when tabs are closed
 chrome.tabs.onRemoved.addListener((tabId) => {
