@@ -8,7 +8,8 @@
     "scripting",
     "storage",
     "declarativeNetRequest",
-    "declarativeNetRequestFeedback"
+    "declarativeNetRequestFeedback",
+    "webNavigation"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {
