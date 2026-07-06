@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Redirect Blocker - Aggressive Test</title>
+  <style>
+    body { font-family: Arial; padding: 20px; background: #222; color: #fff; }
+    .test { margin: 15px 0; padding: 15px; background: #333; border-radius: 8px; }
+    .test h3 { margin-top: 0; color: #8ab4f8; }
+    button { padding: 10px 20px; margin: 5px; cursor: pointer; border: none; border-radius: 4px; }
+    .btn-red { background: #e53935; color: #fff; }
+    .btn-blue { background: #1976d2; color: #fff; }
+    .btn-green { background: #388e3c; color: #fff; }
+    .expected { color: #aaa; font-size: 13px; margin-top: 8px; }
+    .result { padding: 8px; margin-top: 8px; border-radius: 4px; font-size: 13px; display: none; }
+    .result.blocked { background: #4a1a1a; color: #e53935; border: 1px solid #e53935; display: block; }
+    .result.allowed { background: #1a4a1a; color: #4caf50; border: 1px solid #4caf50; display: block; }
+  </style>
+</head>
+<body>
+  <h1>Redirect Blocker - Aggressive Mode Test</h1>
+  <p>Load the extension, then click each test. You should see a "Blocked" toast in the top-right corner.</p>
+
+  <div class="test">
+    <h3>Test 1: window.open popup (button onclick)</h3>
+    <button class="btn-red" onclick="window.open('https://example.com', '_blank')">Open popup</button>
+    <div class="result" id="r1"></div>
+    <p class="expected">Expected: BLOCKED - toast notification appears</p>
+  </div>
+
+  <div class="test">
+    <h3>Test 2: window.location.href redirect</h3>
+    <button class="btn-red" onclick="tryRedirect()">Redirect to example.com</button>
+    <div class="result" id="r2"></div>
+    <p class="expected">Expected: BLOCKED - toast notification appears, page stays</p>
+  </div>
+
+  <div class="test">
+    <h3>Test 3: location.assign redirect</h3>
+    <button class="btn-red" onclick="window.location.assign('https://example.com')">location.assign</button>
+    <div class="result" id="r3"></div>
+    <p class="expected">Expected: BLOCKED</p>
+  </div>
+
+  <div class="test">
+    <h3>Test 4: location.replace redirect</h3>
+    <button class="btn-red" onclick="window.location.replace('https://example.com')">location.replace</button>
+    <div class="result" id="r4"></div>
+    <p class="expected">Expected: BLOCKED</p>
+  </div>
+
+  <div class="test">
+    <h3>Test 5: Script timer redirect (no click)</h3>
+    <button class="btn-red" onclick="setTimeout(() => window.location.href='https://evil.com', 1000)">Start 1s timer redirect</button>
+    <div class="result" id="r5"></div>
+    <p class="expected">Expected: BLOCKED after 1 second</p>
+  </div>
+
+  <div class="test">
+    <h3>Test 6: Fake ad domain</h3>
+    <button class="btn-red" onclick="window.location.href='https://doubleclick.net/test'">Go to doubleclick.net</button>
+    <button class="btn-red" onclick="window.location.href='https://adsrvr.org/test'">Go to adsrvr.org</button>
+    <button class="btn-red" onclick="window.location.href='https://popads.net/test'">Go to popads.net</button>
+    <p class="expected">Expected: ALL BLOCKED</p>
+  </div>
+
+  <div class="test">
+    <h3>Test 7: Invisible overlay</h3>
+    <div style="position:relative;height:120px;border:2px dashed #666;">
+      <p>Click this area (overlay is on top)</p>
+      <div style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:9999;opacity:0.05;background:red;cursor:pointer;" onclick="alert('overlay captured')"></div>
+    </div>
+    <button class="btn-green" onclick="addOverlay()">Inject dynamic overlay</button>
+    <p class="expected">Expected: Overlay click neutralized, dynamic overlay removed</p>
+  </div>
+
+  <div class="test">
+    <h3>Test 8: data: URL (should be blocked)</h3>
+    <button class="btn-red" onclick="window.location.href='data:text/html,<script>alert(1)</script>'">Go to data: URL</button>
+    <p class="expected">Expected: BLOCKED</p>
+  </div>
+
+  <div class="test">
+    <h3>Test 9: javascript: URL (should be blocked)</h3>
+    <button class="btn-red" onclick="window.location.href='javascript:alert(1)'">Go to javascript: URL</button>
+    <p class="expected">Expected: BLOCKED</p>
+  </div>
+
+  <script>
+    function tryRedirect() {
+      window.location.href = 'https://example.com';
+    }
+
+    function addOverlay() {
+      const div = document.createElement('div');
+      div.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:99999;opacity:0.03;background:blue;cursor:pointer;';
+      div.onclick = function() { alert('Dynamic overlay captured click!'); };
+      document.body.appendChild(div);
+    }
+  </script>
+</body>
+</html>

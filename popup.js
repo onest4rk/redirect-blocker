@@ -155,9 +155,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       'location': 'Redirect',
       'location_href': 'Redirect',
       'location_replace': 'Redirect',
-      'location_assign': 'Redirect'
+      'location_assign': 'Redirect',
+      'meta_refresh': 'Meta Redirect'
     };
-    return types[type] || type;
+    return types[type] || 'Blocked';
   }
 
   // Escape HTML to prevent XSS

@@ -1,14 +1,15 @@
 /**
  * Redirect Blocker - Background Service Worker
- * Manages per-tab blocked counts, badge text, and storage.
+ * Manages per-tab blocked counts, badge text, storage,
+ * and webNavigation-based cross-origin blocking.
  */
 
-// Track per-tab blocked counts
+// Track per-tab blocked counts and last allowed URLs
 const tabBlockCounts = {};
+const tabLastUrl = {};
 
 // Initialize when extension loads
 chrome.runtime.onInstalled.addListener(async () => {
-  // Set default storage values if not present
   const result = await chrome.storage.local.get(['siteAllowlist', 'blockedLog', 'globalDisabled']);
 
   if (!result.siteAllowlist) {
@@ -24,22 +25,93 @@ chrome.runtime.onInstalled.addListener(async () => {
   console.log('[Redirect Blocker] Extension installed/updated');
 });
 
+// ============================================================================
+// webNavigation: Block cross-origin navigations
+// ============================================================================
+// This catches link clicks and HTTP-level redirects that the content script
+// can't intercept (because they bypass JavaScript entirely).
+chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
+  // Only handle main frame (not iframes)
+  if (details.frameId !== 0) return;
+
+  // Ignore the very first navigation (initial page load)
+  if (!tabLastUrl[details.tabId]) {
+    tabLastUrl[details.tabId] = details.url;
+    return;
+  }
+
+  // Check if blocking is enabled
+  const result = await chrome.storage.local.get(['siteAllowlist', 'globalDisabled']);
+  if (result.globalDisabled) return;
+
+  const allowlist = result.siteAllowlist || [];
+
+  try {
+    const destUrl = new URL(details.url);
+    const sourceUrl = new URL(tabLastUrl[details.tabId]);
+
+    // Allow same-origin
+    if (destUrl.origin === sourceUrl.origin) {
+      tabLastUrl[details.tabId] = details.url;
+      return;
+    }
+
+    // Allow if destination is in allowlist
+    const destHost = destUrl.hostname;
+    if (allowlist.includes(destHost)) {
+      tabLastUrl[details.tabId] = details.url;
+      return;
+    }
+
+    // Allow if source is in allowlist
+    if (allowlist.includes(sourceUrl.hostname)) {
+      tabLastUrl[details.tabId] = details.url;
+      return;
+    }
+
+    // Block the cross-origin navigation - go back to previous URL
+    console.log('[Redirect Blocker] Blocked cross-origin navigation:', details.url, 'from:', tabLastUrl[details.tabId]);
+
+    // Log the blocked event
+    logBlockedEvent(sourceUrl.hostname, 'navigation', details.url, tabLastUrl[details.tabId]);
+
+    // Increment blocked count
+    if (!tabBlockCounts[details.tabId]) {
+      tabBlockCounts[details.tabId] = 0;
+    }
+    tabBlockCounts[details.tabId]++;
+    updateBadge(details.tabId);
+
+    // Navigate back to the previous page
+    chrome.tabs.update(details.tabId, { url: tabLastUrl[details.tabId] });
+
+  } catch (e) {
+    // Invalid URL, allow it
+    tabLastUrl[details.tabId] = details.url;
+  }
+});
+
+// Track the last valid URL per tab (after successful navigation)
+chrome.webNavigation.onCompleted.addListener((details) => {
+  if (details.frameId !== 0) return;
+  if (details.tabId) {
+    tabLastUrl[details.tabId] = details.url;
+  }
+});
+
 // Listen for messages from content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'blocked') {
     const tabId = sender.tab?.id;
 
     if (tabId) {
-      // Increment counter for this tab
       if (!tabBlockCounts[tabId]) {
         tabBlockCounts[tabId] = 0;
       }
       tabBlockCounts[tabId]++;
 
-      // Update badge text
       updateBadge(tabId);
 
-      // Log the blocked event
       logBlockedEvent(message.hostname, message.blockType, message.details, message.url);
     }
 
@@ -131,7 +203,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 function updateBadge(tabId) {
   const count = tabBlockCounts[tabId] || 0;
 
-  // Only show badge if there are blocks
   if (count > 0) {
     const text = count > 99 ? '99+' : count.toString();
     chrome.action.setBadgeText({ text: text, tabId: tabId });
@@ -156,10 +227,8 @@ async function logBlockedEvent(hostname, blockType, details, pageUrl) {
     pageUrl: pageUrl || ''
   };
 
-  // Add to beginning of log
   log.unshift(entry);
 
-  // Keep only last 500 entries
   if (log.length > 500) {
     log.length = 500;
   }
@@ -183,18 +252,15 @@ async function toggleSiteAllowlist(hostname, enabled) {
   let allowlist = result.siteAllowlist || [];
 
   if (enabled) {
-    // Add to allowlist (blocking disabled)
     if (!allowlist.includes(hostname)) {
       allowlist.push(hostname);
     }
   } else {
-    // Remove from allowlist (blocking enabled)
     allowlist = allowlist.filter(h => h !== hostname);
   }
 
   await chrome.storage.local.set({ siteAllowlist: allowlist });
 
-  // Update all content scripts on this domain
   try {
     const tabs = await chrome.tabs.query({ url: `*://${hostname}/*` });
     for (const tab of tabs) {
@@ -202,9 +268,7 @@ async function toggleSiteAllowlist(hostname, enabled) {
         chrome.tabs.sendMessage(tab.id, { type: 'stateChanged' }).catch(() => {});
       }
     }
-  } catch (e) {
-    // Ignore errors
-  }
+  } catch (e) {}
 }
 
 /**
@@ -248,6 +312,7 @@ async function removeFromAllowlist(hostname) {
 // Clean up when tabs are closed
 chrome.tabs.onRemoved.addListener((tabId) => {
   delete tabBlockCounts[tabId];
+  delete tabLastUrl[tabId];
 });
 
 // Update badge when tab is activated
@@ -258,7 +323,6 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
 // Update badge when tab URL changes
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === 'complete') {
-    // Reset count for new page navigation
     tabBlockCounts[tabId] = 0;
     updateBadge(tabId);
   }
