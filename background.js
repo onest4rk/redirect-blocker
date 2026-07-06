@@ -132,12 +132,16 @@ function updateBadge(tabId) {
   const count = tabBlockCounts[tabId] || 0;
 
   // Only show badge if there are blocks
-  if (count > 0) {
-    const text = count > 99 ? '99+' : count.toString();
-    chrome.action.setBadgeText({ text: text, tabId: tabId });
-    chrome.action.setBadgeBackgroundColor({ color: '#e53935', tabId: tabId });
-  } else {
-    chrome.action.setBadgeText({ text: '', tabId: tabId });
+  try {
+    if (count > 0) {
+      const text = count > 99 ? '99+' : count.toString();
+      chrome.action.setBadgeText({ text: text, tabId: tabId });
+      chrome.action.setBadgeBackgroundColor({ color: '#e53935', tabId: tabId });
+    } else {
+      chrome.action.setBadgeText({ text: '', tabId: tabId });
+    }
+  } catch (e) {
+    // Tab may have been closed
   }
 }
 
