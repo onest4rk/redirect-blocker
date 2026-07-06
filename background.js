@@ -249,9 +249,62 @@ async function removeFromAllowlist(hostname) {
   await chrome.storage.local.set({ siteAllowlist: allowlist });
 }
 
+// ============================================================================
+// webNavigation: Block cross-origin navigations (catches HTTP redirects)
+// ============================================================================
+const tabLastUrl = {};
+
+chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
+  if (details.frameId !== 0) return;
+
+  if (!tabLastUrl[details.tabId]) {
+    tabLastUrl[details.tabId] = details.url;
+    return;
+  }
+
+  const result = await chrome.storage.local.get(['siteAllowlist', 'globalDisabled']);
+  if (result.globalDisabled) return;
+
+  const allowlist = result.siteAllowlist || [];
+
+  try {
+    const dest = new URL(details.url);
+    const source = new URL(tabLastUrl[details.tabId]);
+
+    if (dest.origin === source.origin) {
+      tabLastUrl[details.tabId] = details.url;
+      return;
+    }
+
+    if (allowlist.includes(dest.hostname) || allowlist.includes(source.hostname)) {
+      tabLastUrl[details.tabId] = details.url;
+      return;
+    }
+
+    // Block cross-origin navigation
+    console.log('[Redirect Blocker] webNav blocked:', details.url);
+    logBlockedEvent(source.hostname, 'navigation', details.url, tabLastUrl[details.tabId]);
+
+    if (!tabBlockCounts[details.tabId]) tabBlockCounts[details.tabId] = 0;
+    tabBlockCounts[details.tabId]++;
+    updateBadge(details.tabId);
+
+    // Go back to previous page
+    chrome.tabs.update(details.tabId, { url: tabLastUrl[details.tabId] }).catch(() => {});
+  } catch (e) {
+    tabLastUrl[details.tabId] = details.url;
+  }
+});
+
+chrome.webNavigation.onCompleted.addListener((details) => {
+  if (details.frameId !== 0) return;
+  if (details.tabId) tabLastUrl[details.tabId] = details.url;
+});
+
 // Clean up when tabs are closed
 chrome.tabs.onRemoved.addListener((tabId) => {
   delete tabBlockCounts[tabId];
+  delete tabLastUrl[tabId];
 });
 
 // Update badge when tab is activated

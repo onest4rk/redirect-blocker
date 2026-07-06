@@ -2,9 +2,8 @@
  * Redirect Blocker - Content Script
  * Injected at document_start on all pages.
  *
- * Strong mode: blocks ALL popups and cross-origin redirects.
- * Aggressively detects and removes overlay hijacking elements.
- * Only same-origin navigation is allowed via JS.
+ * Blocks ALL popups, cross-origin redirects, and suspicious link clicks.
+ * Only same-origin navigation is allowed.
  */
 
 (() => {
@@ -13,304 +12,168 @@
   let blockedCount = 0;
   let isExtensionEnabled = true;
 
-  // ============================================================================
-  // Load extension state
-  // ============================================================================
   async function loadState() {
     try {
       const hostname = window.location.hostname;
       const result = await chrome.storage.local.get('siteAllowlist');
       const allowlist = result.siteAllowlist || [];
       isExtensionEnabled = !allowlist.includes(hostname);
-
       const parts = hostname.split('.');
       for (let i = 1; i < parts.length; i++) {
-        const domain = parts.slice(i).join('.');
-        if (allowlist.includes(domain)) {
+        if (allowlist.includes(parts.slice(i).join('.'))) {
           isExtensionEnabled = false;
           break;
         }
       }
-
-      const globalResult = await chrome.storage.local.get('globalDisabled');
-      if (globalResult.globalDisabled) {
-        isExtensionEnabled = false;
-      }
+      const g = await chrome.storage.local.get('globalDisabled');
+      if (g.globalDisabled) isExtensionEnabled = false;
     } catch (e) {}
   }
 
   loadState();
-
-  chrome.storage.onChanged.addListener((changes) => {
-    if (changes.siteAllowlist || changes.globalDisabled) loadState();
+  chrome.storage.onChanged.addListener((c) => {
+    if (c.siteAllowlist || c.globalDisabled) loadState();
   });
 
   function reportBlocked(type, details) {
     blockedCount++;
     try {
       chrome.runtime.sendMessage({
-        type: 'blocked',
-        tabId: null,
-        url: window.location.href,
-        hostname: window.location.hostname,
-        blockType: type,
-        details: details || ''
+        type: 'blocked', tabId: null,
+        url: window.location.href, hostname: window.location.hostname,
+        blockType: type, details: details || ''
       });
     } catch (e) {}
   }
 
-  function showBlockedNotification(url) {
+  function showToast(url) {
     try {
-      let hostname = '';
-      try { hostname = new URL(url).hostname; } catch (e) { hostname = String(url).substring(0, 60); }
-
-      const existing = document.getElementById('rb-blocked-toast');
-      if (existing) existing.remove();
-
-      const notice = document.createElement('div');
-      notice.id = 'rb-blocked-toast';
-      notice.style.cssText = `
-        position: fixed; top: 16px; right: 16px; z-index: 2147483647;
-        background: #1a1a2e; color: #e0e0e0; border: 1px solid #e53935;
-        border-radius: 8px; padding: 12px 16px; font-size: 13px;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.4); max-width: 340px;
-        animation: rb-slide-in 0.3s ease;
-      `;
-      notice.innerHTML =
-        '<span style="color:#e53935;font-weight:600;">Redirect blocked</span><br>' +
-        '<span style="color:#8ab4f8;font-size:12px;">' + escapeHtml(hostname) + '</span>';
-
-      if (!document.getElementById('rb-toast-style')) {
+      let h = '';
+      try { h = new URL(url).hostname; } catch (e) { h = String(url).substring(0, 60); }
+      const old = document.getElementById('rb-toast');
+      if (old) old.remove();
+      const d = document.createElement('div');
+      d.id = 'rb-toast';
+      d.style.cssText = 'position:fixed;top:16px;right:16px;z-index:2147483647;background:#1a1a2e;color:#e0e0e0;border:1px solid #e53935;border-radius:8px;padding:12px 16px;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.4);max-width:340px;animation:rb-in .3s ease';
+      d.innerHTML = '<span style="color:#e53935;font-weight:600">Blocked</span><br><span style="color:#8ab4f8;font-size:12px">' + esc(h) + '</span>';
+      if (!document.getElementById('rb-s')) {
         const s = document.createElement('style');
-        s.id = 'rb-toast-style';
-        s.textContent = '@keyframes rb-slide-in{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}';
+        s.id = 'rb-s';
+        s.textContent = '@keyframes rb-in{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}';
         document.head.appendChild(s);
       }
-
-      (document.body || document.documentElement).appendChild(notice);
-      setTimeout(() => {
-        notice.style.transition = 'opacity 0.3s';
-        notice.style.opacity = '0';
-        setTimeout(() => notice.remove(), 300);
-      }, 3000);
+      (document.body || document.documentElement).appendChild(d);
+      setTimeout(() => { d.style.transition = 'opacity .3s'; d.style.opacity = '0'; setTimeout(() => d.remove(), 300); }, 3000);
     } catch (e) {}
   }
 
-  function escapeHtml(t) {
-    const d = document.createElement('div');
-    d.textContent = t;
-    return d.innerHTML;
-  }
+  function esc(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
 
-  // ============================================================================
-  // 1. BLOCK ALL window.open (popups)
-  //    Only allow if the click was on a real <a> tag with an href.
-  // ============================================================================
-  window.open = function (url) {
+  // ====================================================================
+  // 1. BLOCK ALL window.open
+  // ====================================================================
+  window.open = function () {
     if (!isExtensionEnabled) return null;
-    reportBlocked('popup', url || 'empty');
-    showBlockedNotification(url || 'popup');
-    console.log('[Redirect Blocker] Blocked window.open:', url);
+    reportBlocked('popup', arguments[0] || '');
+    showToast(arguments[0] || 'popup');
     return null;
   };
 
-  // ============================================================================
-  // 2. BLOCK ALL location redirects (href, assign, replace)
-  //    Only same-origin navigation is allowed.
-  // ============================================================================
-
-  function isBlocked(value) {
-    if (!value || typeof value !== 'string') return false;
-    if (!isExtensionEnabled) return false;
-
-    // Allow relative paths
-    if (value.startsWith('/') || value.startsWith('./') || value.startsWith('../') || value.startsWith('#')) {
-      return false;
-    }
-
+  // ====================================================================
+  // 2. BLOCK ALL cross-origin location redirects
+  // ====================================================================
+  function isBlocked(v) {
+    if (!v || typeof v !== 'string' || !isExtensionEnabled) return false;
+    if (v.startsWith('/') || v.startsWith('./') || v.startsWith('../') || v.startsWith('#')) return false;
     try {
-      const parsed = new URL(value, window.location.origin);
-
-      // Block javascript: and data: URLs
-      if (parsed.protocol === 'javascript:' || parsed.protocol === 'data:') {
-        return true;
-      }
-
-      // Allow same-origin
-      if (parsed.origin === window.location.origin) {
-        return false;
-      }
-
-      // Block ALL cross-origin
+      const p = new URL(v, location.origin);
+      if (p.protocol === 'javascript:' || p.protocol === 'data:') return true;
+      if (p.origin === location.origin) return false;
       return true;
-    } catch (e) {
-      return true;
-    }
+    } catch (e) { return true; }
   }
 
-  // Override location.href
-  const locationProto = Object.getPrototypeOf(window.location);
-  const origHrefDesc = Object.getOwnPropertyDescriptor(locationProto, 'href');
-
-  if (origHrefDesc && origHrefDesc.set) {
+  const lp = Object.getPrototypeOf(location);
+  const hd = Object.getOwnPropertyDescriptor(lp, 'href');
+  if (hd && hd.set) {
     try {
-      Object.defineProperty(locationProto, 'href', {
-        configurable: true,
-        enumerable: origHrefDesc.enumerable,
-        get: origHrefDesc.get,
-        set: function (value) {
-          if (!isBlocked(value)) {
-            return origHrefDesc.set.call(this, value);
-          }
-          reportBlocked('location_href', value);
-          showBlockedNotification(value);
-          console.log('[Redirect Blocker] Blocked location.href:', value);
+      Object.defineProperty(lp, 'href', {
+        configurable: true, enumerable: hd.enumerable, get: hd.get,
+        set: function (v) {
+          if (!isBlocked(v)) return hd.set.call(this, v);
+          reportBlocked('location_href', v); showToast(v);
         }
       });
     } catch (e) {}
   }
 
-  // Override location.assign
-  const origAssign = locationProto.assign;
-  if (typeof origAssign === 'function') {
-    locationProto.assign = function (url) {
-      if (!isBlocked(url)) return origAssign.call(this, url);
-      reportBlocked('location_assign', url);
-      showBlockedNotification(url);
-      console.log('[Redirect Blocker] Blocked location.assign:', url);
-    };
-  }
+  const oa = lp.assign;
+  if (typeof oa === 'function') lp.assign = function (u) {
+    if (!isBlocked(u)) return oa.call(this, u);
+    reportBlocked('location_assign', u); showToast(u);
+  };
 
-  // Override location.replace
-  const origReplace = locationProto.replace;
-  if (typeof origReplace === 'function') {
-    locationProto.replace = function (url) {
-      if (!isBlocked(url)) return origReplace.call(this, url);
-      reportBlocked('location_replace', url);
-      showBlockedNotification(url);
-      console.log('[Redirect Blocker] Blocked location.replace:', url);
-    };
-  }
+  const or2 = lp.replace;
+  if (typeof or2 === 'function') lp.replace = function (u) {
+    if (!isBlocked(u)) return or2.call(this, u);
+    reportBlocked('location_replace', u); showToast(u);
+  };
 
-  // Override window.location setter
-  const origLocationDesc = Object.getOwnPropertyDescriptor(window, 'location');
-  if (origLocationDesc && origLocationDesc.configurable) {
+  const od = Object.getOwnPropertyDescriptor(window, 'location');
+  if (od && od.configurable) {
     try {
       Object.defineProperty(window, 'location', {
-        get: function () { return origLocationDesc.get.call(this); },
-        set: function (value) {
-          if (!isBlocked(value)) return origLocationDesc.set.call(this, value);
-          reportBlocked('location', value);
-          showBlockedNotification(value);
-          console.log('[Redirect Blocker] Blocked window.location:', value);
+        get: function () { return od.get.call(this); },
+        set: function (v) {
+          if (!isBlocked(v)) return od.set.call(this, v);
+          reportBlocked('location', v); showToast(v);
         },
         configurable: true
       });
     } catch (e) {}
   }
 
-  // ============================================================================
-  // 3. PROACTIVE CLICK INTERCEPTION
-  //    Before any click handler runs, check if the click target is inside
-  //    a suspicious element. If so, block the click entirely so no redirect
-  //    handler can fire.
-  // ============================================================================
-
-  // Aggressive overlay detection -- catches movie site hijacking patterns
-  function isSuspiciousElement(el) {
-    if (!el || el === document.body || el === document.documentElement) return false;
-
-    const style = window.getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden') return false;
-
-    const position = style.position;
-    if (position !== 'fixed' && position !== 'absolute') return false;
-
-    const zIndex = parseInt(style.zIndex, 10) || 0;
-    const opacity = parseFloat(style.opacity) || 1;
-
-    // Relaxed thresholds: catch more patterns
-    if (zIndex < 100) return false;
-    if (opacity > 0.3) return false;
-
-    // Check if it covers a significant portion of the viewport
-    const rect = el.getBoundingClientRect();
-    if (rect.width < window.innerWidth * 0.3 || rect.height < window.innerHeight * 0.3) return false;
-
-    // Check if it has an onclick, href, or any event listener that could redirect
-    const hasClickHandler = el.onclick || el.getAttribute('onclick') ||
-      el.hasAttribute('href') || el.hasAttribute('data-href');
-
-    // Skip form elements
-    const tag = el.tagName.toLowerCase();
-    if (['button', 'input', 'select', 'textarea', 'label'].includes(tag)) return false;
-
-    return true;
-  }
-
-  // Check if an element is a fake ad button/link (not a real navigation element)
-  function isFakeAdElement(el) {
-    if (!el) return false;
-
-    const tag = el.tagName.toLowerCase();
-
-    // Real links with actual hrefs are OK
-    if (tag === 'a') {
-      const href = el.getAttribute('href');
-      // A real link has an href that points somewhere meaningful
-      if (href && href !== '#' && href !== 'javascript:void(0)' && !href.startsWith('javascript:')) {
-        return false; // It's a real link, don't block
-      }
-    }
-
-    // Check for suspicious attributes
-    const style = window.getComputedStyle(el);
-    const hasHighZIndex = (parseInt(style.zIndex, 10) || 0) > 100;
-    const isFixed = style.position === 'fixed' || style.position === 'absolute';
-    const isTransparent = (parseFloat(style.opacity) || 1) < 0.4;
-    const hasCursor = style.cursor === 'pointer';
-
-    // Suspicious if: transparent + fixed/absolute + high z-index + pointer cursor
-    if (isTransparent && isFixed && hasHighZIndex && hasCursor) {
-      return true;
-    }
-
-    // Check for elements that cover the whole page with pointer-events
-    if (isFixed && hasHighZIndex) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width > window.innerWidth * 0.8 && rect.height > window.innerHeight * 0.8) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  // CAPTURE PHASE click interceptor -- runs before ANY other click handler
-  document.addEventListener('click', (event) => {
+  // ====================================================================
+  // 3. INTERCEPT ALL LINK CLICKS -- block cross-origin <a> navigations
+  //    This is the KEY fix for casino popups from real <a> tags.
+  // ====================================================================
+  document.addEventListener('click', (e) => {
     if (!isExtensionEnabled) return;
 
-    const target = event.target;
-    let el = target;
+    let el = e.target;
 
-    // Walk up from click target to check for overlays and fake elements
+    // Walk up to find the closest <a> tag
     while (el && el !== document.body && el !== document.documentElement) {
-      if (isSuspiciousElement(el)) {
-        event.stopPropagation();
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        reportBlocked('overlay', el.tagName + ' z:' + window.getComputedStyle(el).zIndex);
-        console.log('[Redirect Blocker] Blocked click on suspicious overlay:', el);
+      const tag = el.tagName?.toLowerCase();
+
+      // Found an <a> tag -- check if it goes cross-origin
+      if (tag === 'a') {
+        const href = el.getAttribute('href');
+        if (href && !href.startsWith('#') && !href.startsWith('javascript:') && !href.startsWith('data:')) {
+          try {
+            const target = new URL(href, location.origin);
+            // Block cross-origin link clicks
+            if (target.origin !== location.origin) {
+              e.stopPropagation();
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              reportBlocked('link_click', href);
+              showToast(href);
+              console.log('[Redirect Blocker] Blocked cross-origin link click:', href);
+              return;
+            }
+          } catch (e) {}
+        }
+        // Same-origin link -- let it through
         return;
       }
 
-      if (isFakeAdElement(el)) {
-        event.stopPropagation();
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        reportBlocked('fake_ad', el.tagName);
-        console.log('[Redirect Blocker] Blocked click on fake ad element:', el);
+      // Check for overlay/fake elements
+      if (isOverlay(el)) {
+        e.stopPropagation();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        reportBlocked('overlay', el.tagName);
         return;
       }
 
@@ -318,107 +181,73 @@
     }
   }, true);
 
-  // ============================================================================
-  // 4. MUTATION OBSERVER: Remove overlays and suspicious elements as they appear
-  // ============================================================================
+  // ====================================================================
+  // 4. OVERLAY / FAKE AD DETECTION
+  // ====================================================================
+  function isOverlay(el) {
+    if (!el || el === document.body) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    if (s.position !== 'fixed' && s.position !== 'absolute') return false;
+    const z = parseInt(s.zIndex, 10) || 0;
+    const o = parseFloat(s.opacity) || 1;
+    if (z < 100 || o > 0.3) return false;
+    const r = el.getBoundingClientRect();
+    if (r.width < innerWidth * 0.3 || r.height < innerHeight * 0.3) return false;
+    const tag = el.tagName.toLowerCase();
+    if (['button', 'input', 'select', 'textarea', 'label'].includes(tag)) return false;
+    return true;
+  }
 
-  function removeSuspiciousNodes(root) {
+  // ====================================================================
+  // 5. MUTATION OBSERVER -- remove overlays as they appear
+  // ====================================================================
+  function clean(root) {
     if (!root || !isExtensionEnabled) return;
-
-    // Check the node itself
-    if (root.nodeType === Node.ELEMENT_NODE) {
-      if (isSuspiciousElement(root) || isFakeAdElement(root)) {
-        root.remove();
-        reportBlocked('dynamic_overlay', root.tagName);
-        console.log('[Redirect Blocker] Removed suspicious element:', root);
-        return;
-      }
+    if (root.nodeType === Node.ELEMENT_NODE && isOverlay(root)) {
+      root.remove(); reportBlocked('dyn_overlay', root.tagName); return;
     }
-
-    // Check all children
     if (root.querySelectorAll) {
-      // Remove elements with very high z-index and low opacity
-      const allElements = root.querySelectorAll('*');
-      for (const el of allElements) {
-        if (isSuspiciousElement(el) || isFakeAdElement(el)) {
-          el.remove();
-          reportBlocked('dynamic_overlay_child', el.tagName);
-        }
-      }
+      root.querySelectorAll('*').forEach(el => {
+        if (isOverlay(el)) { el.remove(); reportBlocked('dyn_overlay_child', el.tagName); }
+      });
     }
   }
 
-  const overlayObserver = new MutationObserver((mutations) => {
+  const mo = new MutationObserver((ms) => {
     if (!isExtensionEnabled) return;
-    for (const m of mutations) {
-      for (const n of m.addedNodes) {
-        if (n.nodeType === Node.ELEMENT_NODE) {
-          removeSuspiciousNodes(n);
-        }
-      }
-    }
+    for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1) clean(n);
   });
 
-  if (document.body) {
-    overlayObserver.observe(document.body, { childList: true, subtree: true });
-  } else {
-    document.addEventListener('DOMContentLoaded', () => {
-      overlayObserver.observe(document.body, { childList: true, subtree: true });
-    });
-  }
+  if (document.body) mo.observe(document.body, { childList: true, subtree: true });
+  else document.addEventListener('DOMContentLoaded', () => mo.observe(document.body, { childList: true, subtree: true }));
 
-  // ============================================================================
-  // 5. BLOCK <meta http-equiv="refresh">
-  // ============================================================================
-
-  function checkMetaNode(node) {
-    if (!node || node.nodeType !== Node.ELEMENT_NODE) return;
-    if (node.tagName === 'META') {
-      const equiv = (node.getAttribute('http-equiv') || '').toLowerCase();
-      if (equiv === 'refresh') {
-        if (!isExtensionEnabled) return;
-        node.remove();
-        reportBlocked('meta_refresh', node.getAttribute('content') || '');
-        console.log('[Redirect Blocker] Removed meta-refresh');
-      }
+  // ====================================================================
+  // 6. BLOCK <meta http-equiv="refresh">
+  // ====================================================================
+  function checkMeta(n) {
+    if (!n || n.nodeType !== 1) return;
+    if (n.tagName === 'META' && (n.getAttribute('http-equiv') || '').toLowerCase() === 'refresh') {
+      if (isExtensionEnabled) { n.remove(); reportBlocked('meta_refresh', n.getAttribute('content') || ''); }
       return;
     }
-    if (node.querySelectorAll) {
-      node.querySelectorAll('meta[http-equiv]').forEach(checkMetaNode);
-    }
+    if (n.querySelectorAll) n.querySelectorAll('meta[http-equiv]').forEach(checkMeta);
   }
 
-  checkMetaNode(document.documentElement);
+  checkMeta(document.documentElement);
+  new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) checkMeta(n); })
+    .observe(document.documentElement || document, { childList: true, subtree: true });
 
-  const metaObserver = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      for (const n of m.addedNodes) checkMetaNode(n);
-    }
-  });
-  metaObserver.observe(document.documentElement || document, {
-    childList: true, subtree: true
-  });
-
-  // ============================================================================
-  // 6. Clean up existing overlays on page load
-  // ============================================================================
-  // Run once after DOM is ready to remove any overlays already present
-  function cleanExistingOverlays() {
+  // ====================================================================
+  // 7. Clean existing overlays on load
+  // ====================================================================
+  function cleanExisting() {
     if (!isExtensionEnabled || !document.body) return;
-    const all = document.querySelectorAll('*');
-    for (const el of all) {
-      if (isSuspiciousElement(el) || isFakeAdElement(el)) {
-        el.remove();
-        reportBlocked('existing_overlay', el.tagName);
-        console.log('[Redirect Blocker] Removed existing overlay on load:', el);
-      }
-    }
+    document.querySelectorAll('*').forEach(el => {
+      if (isOverlay(el)) { el.remove(); reportBlocked('existing_overlay', el.tagName); }
+    });
   }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', cleanExistingOverlays);
-  } else {
-    cleanExistingOverlays();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', cleanExisting);
+  else cleanExisting();
 
 })();
