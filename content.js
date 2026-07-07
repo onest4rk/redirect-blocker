@@ -10,18 +10,18 @@
   'use strict';
 
   let blockedCount = 0;
-  let isExtensionEnabled = true;
+  let isExtensionEnabled = false;
 
   async function loadState() {
     try {
       const hostname = window.location.hostname;
-      const result = await chrome.storage.local.get('siteAllowlist');
-      const allowlist = result.siteAllowlist || [];
-      isExtensionEnabled = !allowlist.includes(hostname);
+      const result = await chrome.storage.local.get('siteBlocklist');
+      const blocklist = result.siteBlocklist || [];
+      isExtensionEnabled = blocklist.includes(hostname);
       const parts = hostname.split('.');
       for (let i = 1; i < parts.length; i++) {
-        if (allowlist.includes(parts.slice(i).join('.'))) {
-          isExtensionEnabled = false;
+        if (blocklist.includes(parts.slice(i).join('.'))) {
+          isExtensionEnabled = true;
           break;
         }
       }
@@ -32,7 +32,7 @@
 
   loadState();
   chrome.storage.onChanged.addListener((c) => {
-    if (c.siteAllowlist || c.globalDisabled) loadState();
+    if (c.siteBlocklist || c.globalDisabled) loadState();
   });
 
   function reportBlocked(type, details) {

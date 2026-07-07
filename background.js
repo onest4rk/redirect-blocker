@@ -9,10 +9,10 @@ const tabBlockCounts = {};
 // Initialize when extension loads
 chrome.runtime.onInstalled.addListener(async () => {
   // Set default storage values if not present
-  const result = await chrome.storage.local.get(['siteAllowlist', 'blockedLog', 'globalDisabled']);
+  const result = await chrome.storage.local.get(['siteBlocklist', 'blockedLog', 'globalDisabled']);
 
-  if (!result.siteAllowlist) {
-    await chrome.storage.local.set({ siteAllowlist: [] });
+  if (!result.siteBlocklist) {
+    await chrome.storage.local.set({ siteBlocklist: [] });
   }
   if (!result.blockedLog) {
     await chrome.storage.local.set({ blockedLog: [] });
@@ -54,7 +54,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'toggleSite') {
-    toggleSiteAllowlist(message.hostname, message.enabled).then(() => {
+    toggleSiteBlocklist(message.hostname, message.enabled).then(() => {
       sendResponse({ success: true });
     });
     return true;
@@ -99,21 +99,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'getAllowlist') {
-    chrome.storage.local.get('siteAllowlist').then((result) => {
-      sendResponse({ allowlist: result.siteAllowlist || [] });
+    chrome.storage.local.get('siteBlocklist').then((result) => {
+      sendResponse({ allowlist: result.siteBlocklist || [] });
     });
     return true;
   }
 
   if (message.type === 'addToAllowlist') {
-    addToAllowlist(message.hostname).then(() => {
+    addToBlocklist(message.hostname).then(() => {
       sendResponse({ success: true });
     });
     return true;
   }
 
   if (message.type === 'removeFromAllowlist') {
-    removeFromAllowlist(message.hostname).then(() => {
+    removeFromBlocklist(message.hostname).then(() => {
       sendResponse({ success: true });
     });
     return true;
@@ -180,23 +180,23 @@ async function getBlockedLog() {
 }
 
 /**
- * Toggle a site in the allowlist
+ * Toggle a site in the blocklist (protected sites)
  */
-async function toggleSiteAllowlist(hostname, enabled) {
-  const result = await chrome.storage.local.get('siteAllowlist');
-  let allowlist = result.siteAllowlist || [];
+async function toggleSiteBlocklist(hostname, enabled) {
+  const result = await chrome.storage.local.get('siteBlocklist');
+  let blocklist = result.siteBlocklist || [];
 
   if (enabled) {
-    // Add to allowlist (blocking disabled)
-    if (!allowlist.includes(hostname)) {
-      allowlist.push(hostname);
+    // Add to blocklist (blocking enabled)
+    if (!blocklist.includes(hostname)) {
+      blocklist.push(hostname);
     }
   } else {
-    // Remove from allowlist (blocking enabled)
-    allowlist = allowlist.filter(h => h !== hostname);
+    // Remove from blocklist (blocking disabled)
+    blocklist = blocklist.filter(h => h !== hostname);
   }
 
-  await chrome.storage.local.set({ siteAllowlist: allowlist });
+  await chrome.storage.local.set({ siteBlocklist: blocklist });
 
   // Update all content scripts on this domain
   try {
@@ -215,38 +215,38 @@ async function toggleSiteAllowlist(hostname, enabled) {
  * Check if a site is enabled (blocking is active)
  */
 async function checkSiteEnabled(hostname) {
-  const result = await chrome.storage.local.get(['siteAllowlist', 'globalDisabled']);
+  const result = await chrome.storage.local.get(['siteBlocklist', 'globalDisabled']);
 
   if (result.globalDisabled) {
     return false;
   }
 
-  const allowlist = result.siteAllowlist || [];
-  return !allowlist.includes(hostname);
+  const blocklist = result.siteBlocklist || [];
+  return blocklist.includes(hostname);
 }
 
 /**
- * Add a hostname to the allowlist
+ * Add a hostname to the blocklist
  */
-async function addToAllowlist(hostname) {
-  const result = await chrome.storage.local.get('siteAllowlist');
-  let allowlist = result.siteAllowlist || [];
+async function addToBlocklist(hostname) {
+  const result = await chrome.storage.local.get('siteBlocklist');
+  let blocklist = result.siteBlocklist || [];
 
-  if (!allowlist.includes(hostname)) {
-    allowlist.push(hostname);
-    await chrome.storage.local.set({ siteAllowlist: allowlist });
+  if (!blocklist.includes(hostname)) {
+    blocklist.push(hostname);
+    await chrome.storage.local.set({ siteBlocklist: blocklist });
   }
 }
 
 /**
- * Remove a hostname from the allowlist
+ * Remove a hostname from the blocklist
  */
-async function removeFromAllowlist(hostname) {
-  const result = await chrome.storage.local.get('siteAllowlist');
-  let allowlist = result.siteAllowlist || [];
+async function removeFromBlocklist(hostname) {
+  const result = await chrome.storage.local.get('siteBlocklist');
+  let blocklist = result.siteBlocklist || [];
 
-  allowlist = allowlist.filter(h => h !== hostname);
-  await chrome.storage.local.set({ siteAllowlist: allowlist });
+  blocklist = blocklist.filter(h => h !== hostname);
+  await chrome.storage.local.set({ siteBlocklist: blocklist });
 }
 
 // ============================================================================
@@ -263,10 +263,10 @@ if (chrome.webNavigation && chrome.webNavigation.onBeforeNavigate) {
       return;
   }
 
-  const result = await chrome.storage.local.get(['siteAllowlist', 'globalDisabled']);
+  const result = await chrome.storage.local.get(['siteBlocklist', 'globalDisabled']);
   if (result.globalDisabled) return;
 
-  const allowlist = result.siteAllowlist || [];
+  const blocklist = result.siteBlocklist || [];
 
   try {
     const dest = new URL(details.url);
@@ -277,12 +277,13 @@ if (chrome.webNavigation && chrome.webNavigation.onBeforeNavigate) {
       return;
     }
 
-    if (allowlist.includes(dest.hostname) || allowlist.includes(source.hostname)) {
+    // Only block if the source site is in the blocklist (protected site)
+    if (!blocklist.includes(source.hostname)) {
       tabLastUrl[details.tabId] = details.url;
       return;
     }
 
-    // Block cross-origin navigation
+    // Block cross-origin navigation from protected site
     console.log('[Redirect Blocker] webNav blocked:', details.url);
     logBlockedEvent(source.hostname, 'navigation', details.url, tabLastUrl[details.tabId]);
 

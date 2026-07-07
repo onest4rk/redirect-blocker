@@ -14,13 +14,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Load and display stats
   async function loadStats() {
-    const result = await chrome.storage.local.get(['blockedLog', 'siteAllowlist']);
+    const result = await chrome.storage.local.get(['blockedLog', 'siteBlocklist']);
 
     const log = result.blockedLog || [];
     totalBlocked.textContent = log.length;
 
-    const allowlistArr = result.siteAllowlist || [];
-    allowlistCount.textContent = allowlistArr.length;
+    const blocklistArr = result.siteBlocklist || [];
+    allowlistCount.textContent = blocklistArr.length;
   }
 
   // Load global state
@@ -36,13 +36,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadStats();
   });
 
-  // Load and display allowlist
-  async function loadAllowlist() {
-    const result = await chrome.storage.local.get('siteAllowlist');
-    const list = result.siteAllowlist || [];
+  // Load and display blocklist
+  async function loadBlocklist() {
+    const result = await chrome.storage.local.get('siteBlocklist');
+    const list = result.siteBlocklist || [];
 
     if (list.length === 0) {
-      allowlist.innerHTML = '<div class="empty-state">No sites in allowlist</div>';
+      allowlist.innerHTML = '<div class="empty-state">No protected sites yet</div>';
       return;
     }
 
@@ -57,20 +57,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     allowlist.querySelectorAll('.remove-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const domain = btn.dataset.domain;
-        await removeFromAllowlist(domain);
-        loadAllowlist();
+        await removeFromBlocklist(domain);
+        loadBlocklist();
         loadStats();
       });
     });
   }
 
-  // Add domain to allowlist
+  // Add domain to blocklist
   addBtn.addEventListener('click', async () => {
     const domain = domainInput.value.trim();
     if (domain) {
-      await addToAllowlist(domain);
+      await addToBlocklist(domain);
       domainInput.value = '';
-      loadAllowlist();
+      loadBlocklist();
       loadStats();
     }
   });
@@ -82,30 +82,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Add domain to allowlist
-  async function addToAllowlist(domain) {
+  // Add domain to blocklist
+  async function addToBlocklist(domain) {
     // Normalize: remove protocol and trailing slash
     domain = domain
       .replace(/^https?:\/\//, '')
       .replace(/\/$/, '')
       .toLowerCase();
 
-    const result = await chrome.storage.local.get('siteAllowlist');
-    let list = result.siteAllowlist || [];
+    const result = await chrome.storage.local.get('siteBlocklist');
+    let list = result.siteBlocklist || [];
 
     if (!list.includes(domain)) {
       list.push(domain);
-      await chrome.storage.local.set({ siteAllowlist: list });
+      await chrome.storage.local.set({ siteBlocklist: list });
     }
   }
 
-  // Remove domain from allowlist
-  async function removeFromAllowlist(domain) {
-    const result = await chrome.storage.local.get('siteAllowlist');
-    let list = result.siteAllowlist || [];
+  // Remove domain from blocklist
+  async function removeFromBlocklist(domain) {
+    const result = await chrome.storage.local.get('siteBlocklist');
+    let list = result.siteBlocklist || [];
 
     list = list.filter(d => d !== domain);
-    await chrome.storage.local.set({ siteAllowlist: list });
+    await chrome.storage.local.set({ siteBlocklist: list });
   }
 
   // Load and display blocked log
@@ -182,6 +182,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Initial load
   await loadStats();
   await loadGlobalState();
-  await loadAllowlist();
+  await loadBlocklist();
   await loadBlockedLog();
 });
